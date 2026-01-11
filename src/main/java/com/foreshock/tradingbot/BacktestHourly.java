@@ -1,6 +1,7 @@
 
 package com.foreshock.tradingbot;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.ta4j.core.*;
 import org.ta4j.core.analysis.criteria.MaximumDrawdownCriterion;
 import org.ta4j.core.analysis.criteria.NumberOfPositionsCriterion;
@@ -31,6 +32,16 @@ import java.util.List;
 public class BacktestHourly {
 
     /* ============================ Data Loading ============================ */
+    // Indicators
+    @Value("${smaindicator.fast.barcount}")
+    int smaIndicatorBarCountFast;
+    @Value("${smaindicator.slow.barcount}")
+    int smaIndicatorBarCountSlow;
+    @Value("${rsiindicator.barcount}")
+    int rsiIndicatorBarCount;
+    @Value("${rsiindicator.value}")
+    int rsiIndicatorValue;
+
     static BarSeries loadSeriesFromCsv(String resourceName) throws Exception {
         BarSeries series = new BaseBarSeriesBuilder()
                 .withName("HourlyData")
