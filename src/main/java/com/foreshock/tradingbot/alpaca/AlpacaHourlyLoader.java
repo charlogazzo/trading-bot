@@ -1,8 +1,7 @@
-package com.foreshock.tradingbot;
+package com.foreshock.tradingbot.alpaca;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.ta4j.core.*;
 import org.ta4j.core.analysis.criteria.NumberOfPositionsCriterion;
 import org.ta4j.core.indicators.RSIIndicator;
@@ -74,7 +73,6 @@ public class AlpacaHourlyLoader {
                         response.body());
             }
 
-            // TODO: Redo the JSON parsing
             JsonNode root = mapper.readTree(response.body());
             JsonNode bars = root.get("bars");
             if (bars.isEmpty() || bars.isNull()) {

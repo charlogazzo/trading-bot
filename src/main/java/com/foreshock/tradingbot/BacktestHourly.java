@@ -1,7 +1,7 @@
 
 package com.foreshock.tradingbot;
 
-import org.springframework.beans.factory.annotation.Value;
+import com.foreshock.tradingbot.alpaca.AlpacaHourlyLoader;
 import org.ta4j.core.*;
 import org.ta4j.core.analysis.criteria.MaximumDrawdownCriterion;
 import org.ta4j.core.analysis.criteria.NumberOfPositionsCriterion;
@@ -16,41 +16,35 @@ import org.ta4j.core.rules.*;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Single-file backtest runner with:
- *  - Baseline TA4J backtest (unit positions)
- *  - Risk-aware backtester (1% risk per trade via ATR-based stop)
+ * Backtest runner that can load data from CSV (resources) or Alpaca API,
+ * run baseline TA4J backtest, and run risk-aware backtest (1% risk per trade).
  */
 public class BacktestHourly {
 
-    /* ============================ Data Loading ============================ */
-    // Indicators
-    @Value("${smaindicator.fast.barcount}")
-    int smaIndicatorBarCountFast;
-    @Value("${smaindicator.slow.barcount}")
-    int smaIndicatorBarCountSlow;
-    @Value("${rsiindicator.barcount}")
-    int rsiIndicatorBarCount;
-    @Value("${rsiindicator.value}")
-    int rsiIndicatorValue;
+    /* ============================ Toggle data source ============================ */
+    enum Source { CSV, ALPACA }
 
+    // Update these if you want defaults
+    private static final Source DEFAULT_SOURCE = Source.ALPACA; // or Source.CSV
+    private static final String DEFAULT_SYMBOL = "AAPL";
+    private static final String DEFAULT_CSV_RESOURCE = "hourly_stock_data.csv";
+    private static final ZonedDateTime DEFAULT_START = ZonedDateTime.of(LocalDateTime.of(2024, 1, 2, 0, 0), ZoneId.of("UTC"));
+    private static final ZonedDateTime DEFAULT_END   = ZonedDateTime.of(LocalDateTime.of(2024, 3, 31, 0, 0), ZoneId.of("UTC"));
+
+    /* ============================ Data Loading ============================ */
     static BarSeries loadSeriesFromCsv(String resourceName) throws Exception {
         BarSeries series = new BaseBarSeriesBuilder()
-                .withName("HourlyData")
-                .withNumTypeOf(DoubleNum::valueOf)    // If your TA4J uses withNumTypeOf, rename accordingly
+                .withName("CSV-HourlyData")
+                .withNumTypeOf(DoubleNum::valueOf) // change to withNumTypeOf if your TA4J version requires it
                 .build();
 
-        // CSV timestamps look like: 2024-01-02T10:30
         DateTimeFormatter tsFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
-
         InputStream inputStream = BacktestHourly.class.getClassLoader().getResourceAsStream(resourceName);
         if (inputStream == null) {
             throw new IllegalArgumentException("Resource not found: " + resourceName);
@@ -61,16 +55,14 @@ public class BacktestHourly {
             String line;
             while ((line = br.readLine()) != null) {
                 String[] p = line.split(",");
-                LocalDateTime ldt = LocalDateTime.parse(p[0], tsFmt);
-                ZonedDateTime endTime = ldt.atZone(ZoneId.systemDefault());
+                ZonedDateTime endTime = ZonedDateTime.parse(p[0], tsFmt);
 
-                double open = Double.parseDouble(p[1]);
-                double high = Double.parseDouble(p[2]);
-                double low  = Double.parseDouble(p[3]);
-                double close= Double.parseDouble(p[4]);
-                double volume = Double.parseDouble(p[5]);
+                double open  = Double.parseDouble(p[1]);
+                double high  = Double.parseDouble(p[2]);
+                double low   = Double.parseDouble(p[3]);
+                double close = Double.parseDouble(p[4]);
+                double volume= Double.parseDouble(p[5]);
 
-                // Hourly bars: duration required by BaseBar
                 Bar bar = new BaseBar(Duration.ofHours(1), endTime, open, high, low, close, volume);
                 series.addBar(bar);
             }
@@ -78,39 +70,76 @@ public class BacktestHourly {
         return series;
     }
 
+    static BarSeries loadSeriesFromAlpaca(String symbol,
+                                          ZonedDateTime start,
+                                          ZonedDateTime end) throws Exception {
+        // Delegate to your working AlpacaHourlyLoader
+        // Your loader reads API keys from env or parameters; here we pass env
+        String apiKey = System.getenv("ALPACA_API_KEY");
+        String apiSecret = System.getenv("ALPACA_API_SECRET");
+        if (apiKey == null || apiSecret == null) {
+            throw new IllegalStateException("Missing env vars ALPACA_API_KEY / ALPACA_API_SECRET");
+        }
+        return AlpacaHourlyLoader.loadHourlyBars(symbol, start, end, apiKey, apiSecret);
+    }
+
+    static BarSeries loadSeries(Source source,
+                                String symbol,
+                                String csvResource,
+                                ZonedDateTime start,
+                                ZonedDateTime end) throws Exception {
+        switch (source) {
+            case CSV:    return loadSeriesFromCsv(csvResource);
+            case ALPACA: return loadSeriesFromAlpaca(symbol, start, end);
+            default: throw new IllegalArgumentException("Unknown source: " + source);
+        }
+    }
+
     /* ============================ Strategy ============================ */
-    /*
-        Basic Trading strategy
-     */
     static Strategy buildStrategy(BarSeries series) {
         ClosePriceIndicator close = new ClosePriceIndicator(series);
-        SMAIndicator smaFast  = new SMAIndicator(close, 20);
+        // 20/60 SMAs to get reasonable frequency on hourly data
+        SMAIndicator smaFast = new SMAIndicator(close, 20);
         SMAIndicator smaSlow = new SMAIndicator(close, 60);
-        RSIIndicator rsi14  = new RSIIndicator(close, 14);
+        RSIIndicator rsi14   = new RSIIndicator(close, 14);
 
-        // Relaxed RSI so you get trades on synthetic data (e.g., 80)
         Rule entryRule = new CrossedUpIndicatorRule(smaFast, smaSlow)
-                .and(new UnderIndicatorRule(rsi14, series.numOf(80)));
-
-        // Exit when trend turns down (you can add StopLoss/StopGain in risk engine instead)
-        Rule exitRule = new CrossedDownIndicatorRule(smaFast, smaSlow);
+                .and(new UnderIndicatorRule(rsi14, series.numOf(50))); // relax to 80 if desired
+        Rule exitRule  = new CrossedDownIndicatorRule(smaFast, smaSlow);
 
         return new BaseStrategy(entryRule, exitRule);
     }
 
-    /* ====================== Risk-Aware Backtester (Nested) ====================== */
+    /* ============================ Debug (optional) ============================ */
+    static void debugSignals(BarSeries series, Strategy strategy) {
+        ClosePriceIndicator close = new ClosePriceIndicator(series);
+        int enters = 0, exits = 0;
+        for (int i = 0; i < series.getBarCount(); i++) {
+            boolean enter = strategy.shouldEnter(i);
+            boolean exit  = strategy.shouldExit(i);
+            if (enter || exit) {
+                System.out.printf("Signal @ %4d  %s  enter=%s exit=%s  close=%.4f%n",
+                        i, series.getBar(i).getEndTime(), enter, exit, close.getValue(i).doubleValue());
+            }
+            if (enter) enters++;
+            if (exit) exits++;
+        }
+        System.out.println("Total ENTER signals: " + enters + " | EXIT signals: " + exits);
+    }
+
+    /* ====================== Risk-Aware Backtester (nested) ====================== */
     public static final class RiskBacktester {
 
         public static final class Config {
             public double startingEquity = 100_000.0;
-            public double riskFraction = 0.01;   // 1% per trade
-            public int atrLength = 14;
-            public double atrMultiple = 2.0;     // stop distance = ATR * multiple
-            public double takeProfitR = 2.0;     // take profit at 2R; set <=0 to disable
-            public double commissionPerShare = 0.001; // $0.001/share
-            public double slippageBps = 1.0;     // 1 bp = 0.01% (applied to fills)
-            public boolean enforceCash = true;   // do not exceed available cash
-            public int warmupBars = 200;         // ensure indicators (SMA200, ATR) are ready
+            public double riskFraction   = 0.01;    // 1% risk per trade
+            public int    atrLength      = 14;
+            public double atrMultiple    = 2.0;     // stop = entry - ATR*multiple
+            public double takeProfitR    = 2.0;     // TP at 2R (<=0 disables)
+            public double commissionPerShare = 0.001;
+            public double slippageBps    = 1.0;     // 1 bp = 0.01%
+            public boolean enforceCash   = true;
+            public int    warmupBars     = 100;     // allow earlier entries; ensure indicators valid
         }
 
         public static final class Trade {
@@ -121,7 +150,7 @@ public class BacktestHourly {
             public int shares;
             public boolean exitByStop;
             public boolean exitByTP;
-            public double pnl; // realized PnL after commissions
+            public double pnl;
             @Override public String toString() {
                 return String.format(
                         "Trade{entryIdx=%d @ %.4f, exitIdx=%d @ %.4f, shares=%d, pnl=%.2f, stop=%s, tp=%s}",
@@ -131,11 +160,11 @@ public class BacktestHourly {
         }
 
         public static final class Result {
-            public List<Double> equityCurve = new ArrayList<>(); // per bar equity at close
+            public List<Double> equityCurve = new ArrayList<>();
             public List<Trade> trades = new ArrayList<>();
             public double finalEquity;
-            public double totalReturn;  // finalEquity / startingEquity - 1
-            public double maxDrawdown;  // in decimal (0.12 = -12%)
+            public double totalReturn;
+            public double maxDrawdown;
             public double winRate;
         }
 
@@ -157,8 +186,8 @@ public class BacktestHourly {
             int entryIndex = -1;
             double entryCommission = 0.0;
 
-            double peakEquity = cfg.startingEquity;
-            double maxDD = 0.0;
+            double peak = cfg.startingEquity;
+            double mdd = 0.0;
 
             for (int i = start; i < n; i++) {
                 Bar prev = series.getBar(i - 1);
@@ -171,37 +200,27 @@ public class BacktestHourly {
                 double currClose = curr.getClosePrice().doubleValue();
                 double atrPrev   = atr.getValue(i - 1).doubleValue();
 
-                // Equity at previous close (mark-to-market)
+                // equity at previous close
                 double equity = cash + (inPosition ? posShares * prevClose : 0.0);
-                peakEquity = Math.max(peakEquity, equity);
-                if (peakEquity > 0) {
-                    maxDD = Math.max(maxDD, (peakEquity - equity) / peakEquity);
-                }
+                peak = Math.max(peak, equity);
+                if (peak > 0) mdd = Math.max(mdd, (peak - equity) / peak);
 
-                /* -------- EXIT PHASE (evaluated on prev bar, filled on current bar) -------- */
+                // EXIT phase (signal at i-1, fill at bar i)
                 if (inPosition) {
-                    boolean stopHit = currLow <= posStop; // intrabar breach of stop
+                    boolean stopHit = currLow <= posStop;
                     boolean exitSignal = strategy.shouldExit(i - 1);
 
                     boolean tpHit = false;
                     if (cfg.takeProfitR > 0) {
-                        double riskPerShareAtEntry = posEntryPrice - posStop;
-                        double tpPrice = posEntryPrice + cfg.takeProfitR * riskPerShareAtEntry;
+                        double riskPerShare = posEntryPrice - posStop;
+                        double tpPrice = posEntryPrice + cfg.takeProfitR * riskPerShare;
                         tpHit = currHigh >= tpPrice;
                     }
 
                     if (stopHit || exitSignal || tpHit) {
-                        // Slippage for sells: subtract
                         double slippageSell = currOpen * (cfg.slippageBps / 10_000.0);
-
-                        double exitFill;
-                        if (stopHit) {
-                            // Fill at stop (conservative: minus slippage)
-                            exitFill = posStop - (posStop * (cfg.slippageBps / 10_000.0));
-                        } else {
-                            // Strategy/TP exits at open minus slippage
-                            exitFill = currOpen - slippageSell;
-                        }
+                        double exitFill = stopHit ? (posStop - posStop * (cfg.slippageBps / 10_000.0))
+                                : (currOpen - slippageSell);
 
                         double proceeds = posShares * exitFill;
                         double exitCommission = posShares * cfg.commissionPerShare;
@@ -211,16 +230,15 @@ public class BacktestHourly {
 
                         Trade tr = new Trade();
                         tr.entryIndex = entryIndex;
-                        tr.exitIndex = i;
+                        tr.exitIndex  = i;
                         tr.entryPrice = posEntryPrice;
-                        tr.exitPrice = exitFill;
-                        tr.shares = posShares;
+                        tr.exitPrice  = exitFill;
+                        tr.shares     = posShares;
                         tr.exitByStop = stopHit;
-                        tr.exitByTP = tpHit;
-                        tr.pnl = pnl;
+                        tr.exitByTP   = tpHit;
+                        tr.pnl        = pnl;
                         out.trades.add(tr);
 
-                        // Reset position
                         inPosition = false;
                         posShares = 0;
                         posEntryPrice = 0.0;
@@ -230,7 +248,7 @@ public class BacktestHourly {
                     }
                 }
 
-                /* -------- ENTRY PHASE (signal on i-1, fill at i open) -------- */
+                // ENTRY phase (signal at i-1, fill at bar i open)
                 if (!inPosition && strategy.shouldEnter(i - 1)) {
                     if (!Double.isNaN(atrPrev) && atrPrev > 0) {
                         double riskPerShare = atrPrev * cfg.atrMultiple;
@@ -250,9 +268,8 @@ public class BacktestHourly {
                                 posStop = entryFill - riskPerShare;
                                 entryCommission = commission;
                                 entryIndex = i;
-                                cash -= cost; // pay from cash
+                                cash -= cost;
                             } else {
-                                // Not enough cash -> try scaled position
                                 int affordable = (int) Math.floor((cash - commission) / entryFill);
                                 if (affordable >= 1) {
                                     inPosition = true;
@@ -268,7 +285,7 @@ public class BacktestHourly {
                     }
                 }
 
-                // Record equity at current close
+                // record equity at current close
                 double equityAtClose = cash + (inPosition ? posShares * currClose : 0.0);
                 out.equityCurve.add(equityAtClose);
             }
@@ -276,92 +293,84 @@ public class BacktestHourly {
             out.finalEquity = out.equityCurve.isEmpty() ? cfg.startingEquity : out.equityCurve.get(out.equityCurve.size() - 1);
             out.totalReturn = out.finalEquity / cfg.startingEquity - 1.0;
 
-            // Win rate
             int wins = 0;
             for (Trade t : out.trades) if (t.pnl > 0) wins++;
             out.winRate = out.trades.isEmpty() ? 0.0 : (wins * 1.0 / out.trades.size());
 
-            // Max drawdown recomputed from equity curve
-            double peak = Double.NEGATIVE_INFINITY;
-            double mdd = 0.0;
+            // recompute max DD from equity curve
+            double peak2 = Double.NEGATIVE_INFINITY;
+            double dd = 0.0;
             for (double e : out.equityCurve) {
-                peak = Math.max(peak, e);
-                if (peak > 0) mdd = Math.max(mdd, (peak - e) / peak);
+                peak2 = Math.max(peak2, e);
+                if (peak2 > 0) dd = Math.max(dd, (peak2 - e) / peak2);
             }
-            out.maxDrawdown = mdd;
+            out.maxDrawdown = dd;
 
             return out;
         }
     }
 
-    /*
-        Used to debug the trading signals to show even the signals that occur before the
-        During the warmup phase
-     */
-    /*static void debugSignals(BarSeries series, Strategy strategy) {
-        ClosePriceIndicator close = new ClosePriceIndicator(series);
-        int crosses = 0;
-        for (int i = 0; i < series.getBarCount(); i++) {
-            boolean enter = strategy.shouldEnter(i);
-            boolean exit  = strategy.shouldExit(i);
-            if (enter || exit) {
-                System.out.printf("Bar %d  time=%s  enter=%s  exit=%s  close=%.4f%n",
-                        i, series.getBar(i).getEndTime(), enter, exit, close.getValue(i).doubleValue());
-            }
-            if (enter) crosses++;
-        }
-        System.out.println("Total ENTER signals found: " + crosses);
-    }*/
-
-
-    /* ============================ Main Runner ============================ */
+    /* ============================ Main ============================ */
     public static void main(String[] args) throws Exception {
-        // 1) Load data from resources
-        BarSeries series = loadSeriesFromCsv("hourly_stock_data.csv");
+        // CLI: BacktestHourly [CSV|ALPACA] [SYMBOL] [START_yyyy-MM-dd] [END_yyyy-MM-dd]
+        Source source = (args.length >= 1) ? Source.valueOf(args[0].toUpperCase()) : DEFAULT_SOURCE;
+        String symbol  = (args.length >= 2) ? args[1] : DEFAULT_SYMBOL;
 
-        // 2) Build strategy (SMA(50/200) + RSI filter)
+        ZonedDateTime start = (args.length >= 3)
+                ? ZonedDateTime.of(LocalDate.parse(args[2]).atStartOfDay(), ZoneId.of("UTC"))
+                : DEFAULT_START;
+        ZonedDateTime end   = (args.length >= 4)
+                ? ZonedDateTime.of(LocalDate.parse(args[3]).atStartOfDay(), ZoneId.of("UTC"))
+                : DEFAULT_END;
+
+        System.out.printf("Loading %s data for %s from %s to %s ...%n",
+                source, symbol, start, end);
+
+        BarSeries series = (source == Source.CSV)
+                ? loadSeries(source, symbol, DEFAULT_CSV_RESOURCE, start, end)
+                : loadSeries(source, symbol, null, start, end);
+
+        System.out.println("Loaded bars: " + series.getBarCount());
+
         Strategy strategy = buildStrategy(series);
 
-        // debugging the signals
+        // Optional: watch signals
         // debugSignals(series, strategy);
 
-        // 3) Baseline TA4J backtest (unit positions)
-        BarSeriesManager manager = new BarSeriesManager(series);
-        TradingRecord record = manager.run(strategy);
-
+        // Baseline TA4J unit-position backtest
+        TradingRecord record = new BarSeriesManager(series).run(strategy);
         AnalysisCriterion grossProfit = new GrossProfitCriterion();
         AnalysisCriterion maxDDCriterion = new MaximumDrawdownCriterion();
         AnalysisCriterion tradesCriterion = new NumberOfPositionsCriterion();
 
-        System.out.println("=== TA4J Baseline (unit positions) ===");
+        System.out.println("\n=== TA4J Baseline (unit positions) ===");
         System.out.println("Bars: " + series.getBarCount());
         System.out.println("Trades: " + tradesCriterion.calculate(series, record));
         System.out.println("Gross Profit (multiple): " + grossProfit.calculate(series, record));
         System.out.println("Max Drawdown (criterion): " + maxDDCriterion.calculate(series, record));
-        System.out.println();
 
-        // 4) Risk-aware backtest (1% risk/trade)
+        // Risk-aware backtest (1% risk/trade)
         RiskBacktester.Config cfg = new RiskBacktester.Config();
         cfg.startingEquity = 100_000.0;
-        cfg.riskFraction = 0.01;     // 1%
-        cfg.atrLength = 14;
-        cfg.atrMultiple = 2.0;       // stop = entry - 2*ATR
-        cfg.takeProfitR = 2.0;       // TP at 2R (set <= 0 to disable)
+        cfg.riskFraction   = 0.01;
+        cfg.atrLength      = 14;
+        cfg.atrMultiple    = 2.0;
+        cfg.takeProfitR    = 2.0;
         cfg.commissionPerShare = 0.001;
-        cfg.slippageBps = 1.0;
-        cfg.enforceCash = true;
-        cfg.warmupBars = 200;
+        cfg.slippageBps    = 1.0;
+        cfg.enforceCash    = true;
+        cfg.warmupBars     = 100;
 
         RiskBacktester.Result res = RiskBacktester.simulate(series, strategy, cfg);
 
-        System.out.println("=== Risk-Aware Backtest (1% risk/trade) ===");
+        System.out.println("\n=== Risk-Aware Backtest (1% risk/trade) ===");
         System.out.printf("Trades: %d%n", res.trades.size());
         System.out.printf("Final Equity: %.2f%n", res.finalEquity);
         System.out.printf("Total Return: %.2f%%%n", res.totalReturn * 100);
         System.out.printf("Win Rate: %.2f%%%n", res.winRate * 100);
         System.out.printf("Max Drawdown: %.2f%%%n", res.maxDrawdown * 100);
 
-        // Optional: print trade log detail
+        // Optional: print trade log
         for (RiskBacktester.Trade t : res.trades) {
             System.out.println(t);
         }
