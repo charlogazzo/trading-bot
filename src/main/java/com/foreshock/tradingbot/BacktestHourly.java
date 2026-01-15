@@ -2,6 +2,8 @@
 package com.foreshock.tradingbot;
 
 import com.foreshock.tradingbot.alpaca.AlpacaHourlyLoader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.ta4j.core.*;
 import org.ta4j.core.analysis.criteria.MaximumDrawdownCriterion;
 import org.ta4j.core.analysis.criteria.NumberOfPositionsCriterion;
@@ -29,6 +31,8 @@ public class BacktestHourly {
 
     /* ============================ Toggle data source ============================ */
     enum Source { CSV, ALPACA }
+
+    private static final Logger log = LoggerFactory.getLogger(BacktestHourly.class);
 
     // Update these if you want defaults
     private static final Source DEFAULT_SOURCE = Source.ALPACA; // or Source.CSV
@@ -118,7 +122,7 @@ public class BacktestHourly {
             boolean enter = strategy.shouldEnter(i);
             boolean exit  = strategy.shouldExit(i);
             if (enter || exit) {
-                System.out.printf("Signal @ %4d  %s  enter=%s exit=%s  close=%.4f%n",
+                log.info("Signal @ {}  {}  enter={} exit={}  close={}",
                         i, series.getBar(i).getEndTime(), enter, exit, close.getValue(i).doubleValue());
             }
             if (enter) enters++;
@@ -323,7 +327,7 @@ public class BacktestHourly {
                 ? ZonedDateTime.of(LocalDate.parse(args[3]).atStartOfDay(), ZoneId.of("UTC"))
                 : DEFAULT_END;
 
-        System.out.printf("Loading %s data for %s from %s to %s ...%n",
+        log.info("Loading {} data for {} from {} to {} ...%n",
                 source, symbol, start, end);
 
         BarSeries series = (source == Source.CSV)
@@ -343,11 +347,11 @@ public class BacktestHourly {
         AnalysisCriterion maxDDCriterion = new MaximumDrawdownCriterion();
         AnalysisCriterion tradesCriterion = new NumberOfPositionsCriterion();
 
-        System.out.println("\n=== TA4J Baseline (unit positions) ===");
-        System.out.println("Bars: " + series.getBarCount());
-        System.out.println("Trades: " + tradesCriterion.calculate(series, record));
-        System.out.println("Gross Profit (multiple): " + grossProfit.calculate(series, record));
-        System.out.println("Max Drawdown (criterion): " + maxDDCriterion.calculate(series, record));
+        log.info("\n=== TA4J Baseline (unit positions) ===");
+        log.info("Bars: {}", series.getBarCount());
+        log.info("Trades: {}", tradesCriterion.calculate(series, record));
+        log.info("Gross Profit (multiple): {}", grossProfit.calculate(series, record));
+        log.info("Max Drawdown (criterion): {}", maxDDCriterion.calculate(series, record));
 
         // Risk-aware backtest (1% risk/trade)
         RiskBacktester.Config cfg = new RiskBacktester.Config();
@@ -363,16 +367,16 @@ public class BacktestHourly {
 
         RiskBacktester.Result res = RiskBacktester.simulate(series, strategy, cfg);
 
-        System.out.println("\n=== Risk-Aware Backtest (1% risk/trade) ===");
-        System.out.printf("Trades: %d%n", res.trades.size());
-        System.out.printf("Final Equity: %.2f%n", res.finalEquity);
-        System.out.printf("Total Return: %.2f%%%n", res.totalReturn * 100);
-        System.out.printf("Win Rate: %.2f%%%n", res.winRate * 100);
-        System.out.printf("Max Drawdown: %.2f%%%n", res.maxDrawdown * 100);
+        log.info("\n=== Risk-Aware Backtest (1% risk/trade) ===");
+        log.info("Trades: {}", res.trades.size());
+        log.info("Final Equity: {}", res.finalEquity);
+        log.info("Total Return: {}", res.totalReturn * 100);
+        log.info("Win Rate: {}", res.winRate * 100);
+        log.info("Max Drawdown: {}", res.maxDrawdown * 100);
 
         // Optional: print trade log
         for (RiskBacktester.Trade t : res.trades) {
-            System.out.println(t);
+            log.info(String.valueOf(t));
         }
     }
 }

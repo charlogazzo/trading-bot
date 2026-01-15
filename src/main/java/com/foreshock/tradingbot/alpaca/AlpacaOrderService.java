@@ -3,6 +3,8 @@ package com.foreshock.tradingbot.alpaca;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.foreshock.tradingbot.alpaca.model.AlpacaOrder;
 import com.foreshock.tradingbot.alpaca.model.enums.Side;
 import com.foreshock.tradingbot.alpaca.model.enums.TimeInForce;
@@ -20,6 +22,8 @@ public class AlpacaOrderService {
     private static final String BASE_URL = "https://paper-api.alpaca.markets/v2/orders";
     private static final String API_KEY_ID = System.getenv("ALPACA_API_KEY");
     private static final String API_SECRET_KEY = System.getenv("ALPACA_API_SECRET");
+
+    private static final Logger log = LoggerFactory.getLogger(AlpacaOrderService.class);
 
     /* Order attributes */
     private static final String symbol = "AAPL";

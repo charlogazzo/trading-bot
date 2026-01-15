@@ -11,6 +11,8 @@ import org.ta4j.core.num.DoubleNum;
 import org.ta4j.core.rules.CrossedDownIndicatorRule;
 import org.ta4j.core.rules.CrossedUpIndicatorRule;
 import org.ta4j.core.rules.UnderIndicatorRule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,10 +28,10 @@ public class AlpacaHourlyLoader {
     private static final String BASE_URL = "https://data.alpaca.markets";
     private static  final DateTimeFormatter ISO_INSTANT = DateTimeFormatter.ISO_INSTANT;  // UTC
 
-
     private static final String API_KEY_ID = System.getenv("ALPACA_API_KEY");
-
     private static final String API_SECRET_KEY = System.getenv("ALPACA_API_SECRET");
+
+    private static final Logger log = LoggerFactory.getLogger(AlpacaHourlyLoader.class);
 
     public static BarSeries loadHourlyBars(String symbol, ZonedDateTime startInclusive,
                                            ZonedDateTime endInclusive, String apiKey, String apiSecret) throws Exception {
@@ -127,17 +129,13 @@ public class AlpacaHourlyLoader {
                 ZoneId.of("UTC"));
 
         BarSeries series = loadHourlyBars(symbol, start, end, API_KEY_ID, API_SECRET_KEY);
-        System.out.println("Loaded bars: " + series.getBarCount());
+        log.info("Loaded bars: {}", series.getBarCount());
 
         Strategy strategy = buildStrategy(series);
 
         // Baseline unit-position backtest
         TradingRecord record = new BarSeriesManager(series).run(strategy);
-        System.out.println("Baseline trades: " + new NumberOfPositionsCriterion()
+        log.info("Baseline trades: {}", new NumberOfPositionsCriterion()
                 .calculate(series, record));
-//        System.out.println("\n ========= Positions =========== \n");
-//        for (Position p : record.getPositions()) {
-//            System.out.println(p);
-//        }
     }
 }

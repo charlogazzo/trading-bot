@@ -6,6 +6,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.stereotype.Component;
 import org.ta4j.core.Bar;
 import org.ta4j.core.BaseBar;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -23,6 +25,8 @@ public class AlpacaBarService {
     public final String API_KEY_ID = System.getenv("ALPACA_API_KEY");
     public final String API_SECRET_KEY = System.getenv("ALPACA_API_SECRET");
 
+    private static final Logger log = LoggerFactory.getLogger(AlpacaBarService.class);
+
     static HttpClient client = HttpClient.newHttpClient();
 
     public List<Bar> getBarResponse(List<String> symbols) throws Exception {
@@ -32,7 +36,7 @@ public class AlpacaBarService {
         String jsonResponse = response.body();
         List<Bar> bars = mapJsonNodeToBarNode(jsonResponse, symbols);
 
-        System.out.println("\n ======== Response ======== \n" + response.body());
+        log.info("\n ======== Response ======== \n {}", response.body());
         return bars;
     }
 
