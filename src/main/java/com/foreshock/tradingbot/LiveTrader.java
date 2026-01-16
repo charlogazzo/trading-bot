@@ -24,8 +24,8 @@ public class LiveTrader {
     public Bar fetchLatestBarFromBroker(String symbol) throws Exception {
         Map<String, Bar> bars = alpacaBarService.getBarResponse(List.of(symbol));
 
-        if (bars.size() != 1) {
-            throw new Exception("More than one bar was received");
+        if (bars == null || bars.size() != 1) {
+            throw new Exception("Invalid Response");
         }
         return bars.get(symbol);
     }
@@ -44,8 +44,16 @@ public class LiveTrader {
      * @param symbols symbols of the assets whose bars are to be retrieved
      * @return requested bars
      */
-    public Map<String, Bar> fetchLatestBarsFromBroker(List<String> symbols) {
-        return null;
+    public Map<String, Bar> fetchLatestBarsFromBroker(List<String> symbols) throws Exception{
+        if (symbols.isEmpty()) {
+            throw new IllegalArgumentException("Provided list of symbols is empty");
+        }
+        Map<String, Bar> bars = alpacaBarService.getBarResponse(symbols);
+
+        if (bars == null) {
+            throw new Exception("The bar response is null");
+        }
+        return bars;
     }
 
     public void placeBuyOrder() {}
