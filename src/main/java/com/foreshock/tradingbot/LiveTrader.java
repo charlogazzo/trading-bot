@@ -22,12 +22,12 @@ public class LiveTrader {
         @return the latest bar of the symbol
      */
     public Bar fetchLatestBarFromBroker(String symbol) throws Exception {
-        List<Bar> bars = alpacaBarService.getBarResponse(List.of(symbol));
+        Map<String, Bar> bars = alpacaBarService.getBarResponse(List.of(symbol));
 
         if (bars.size() != 1) {
             throw new Exception("More than one bar was received");
         }
-        return bars.getFirst();
+        return bars.get(symbol);
     }
 
     /**
