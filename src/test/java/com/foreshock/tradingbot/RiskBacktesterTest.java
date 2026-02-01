@@ -123,65 +123,6 @@ public class RiskBacktesterTest {
                 "Partial should be subset of total position");
     }
 
-
-    /*@Test
-    public void testBreakEvenRaisesStopToEntry() {
-        // Entry @ 102.0; after bar3 prevClose >= 103.0 -> BE triggers (stop raised to 102.0)
-        // Bar4 low < 102 triggers stop at 102.0
-
-        BarSeries s = buildSeriesWithOHLC(new double[][]{
-                {100, 100.5,  99.5, 100.0}, // bar0
-                {101, 101.5, 100.5, 101.0}, // bar1 (signal)
-                {102, 102.5, 101.5, 102.0}, // bar2 (entry)
-                {103.2, 103.5, 102.8, 103.2}, // bar3 (prevClose >= 103 -> BE eligible next bar)
-                {101.9, 102.3, 101.5, 102.0}  // bar4: low < entry => stop @ entry
-        });
-
-        Strategy strat = enterOnceAt(1);
-        var cfg = baseCfg();
-        cfg.useBreakEven = true;
-        cfg.breakEvenR   = 1.0;
-
-        var res = BacktestHourly.RiskBacktester.simulate(s, strat, cfg);
-        assertEquals(1, res.trades.size());
-        var tr = res.trades.get(0);
-        assertEquals(102.0, tr.exitPrice, 1e-9);
-        assertTrue(tr.exitByStop, "Should exit via stop (moved to entry)");
-    }*/
-
-    @Test
-    public void testBreakEvenRaisesStopToEntry() {
-        // Entry @ 102.0; after bar3 prevClose >= 103.0 -> BE triggers (stop raised to 102.0)
-        // Bar4 low < 102 triggers stop at 102.0
-
-        // bar0: establish ATR (let's say TR=1.0 for simplicity)
-        // bar1: signal
-        // bar2: entry at 102.0, risk=1.0, beTrigger=102.0+1.0*1.0=103.0
-        // bar3: close needs to be >= 103.0
-
-        BarSeries s = buildSeriesWithOHLC(new double[][]{
-                {100, 101,  99, 100},    // bar0: TR=2.0 (100-99=1, but max is actually 101-99=2)
-                {101, 101.5, 100.5, 101}, // bar1: signal
-                {102, 102.5, 101.5, 103.1}, // bar2: entry, close=103.1 (>= 103.0!)
-                {103.2, 103.5, 102.8, 103.2}, // bar3: BE applies (prevClose=103.1 >= 103.0)
-                {101.9, 102.3, 101.5, 102.0}  // bar4: low < 102 => stop at 102.0
-        });
-
-        Strategy strat = enterOnceAt(1);
-        var cfg = baseCfg();
-        cfg.useBreakEven = true;
-        cfg.breakEvenR   = 1.0;
-        cfg.atrLength = 1;
-        cfg.atrMultiple = 1.0;
-
-        var res = BacktestHourly.RiskBacktester.simulate(s, strat, cfg);
-        assertEquals(1, res.trades.size());
-        var tr = res.trades.get(0);
-        assertEquals(102.0, tr.exitPrice, 1e-9);
-        assertTrue(tr.exitByStop, "Should exit via stop (moved to entry)");
-    }
-
-
     @Test
     public void testTimeBasedExit() {
         // Exit after 2 bars in trade if nothing else triggers.
@@ -206,6 +147,50 @@ public class RiskBacktesterTest {
         assertFalse(tr.exitByTP);
         assertEquals(102.0, tr.exitPrice, 1e-9, "Exit at open due to time limit");
     }
+
+    @Test
+    public void testBreakEvenRaisesStopToEntrySimple() {
+        // Construct a minimal series where ATR at entry = 1.0, entry at 102.0,
+        // bar2 close >= 103.0 triggers BE (entry + 1R), then next bar low < 102 -> stop at entry
+
+        BarSeries s = buildSeriesWithOHLC(new double[][]{
+                {100, 100, 100, 100}, // bar0
+                {101, 101, 100, 101}, // bar1 (signal + TR=1.0)
+                {102, 103.5, 101.5, 103.1}, // bar2 (entry at 102.0, close >= 103.0 -> BE eligible)
+                {103.2, 103.5, 101.9, 102.0}  // bar3: low < 102 -> stop at entry
+        });
+
+        Strategy strat = enterOnceAt(1);
+        var cfg = baseCfg();
+        cfg.useBreakEven = true;
+        cfg.breakEvenR   = 1.0;
+        cfg.atrLength = 1;
+        cfg.atrMultiple = 1.0;
+
+        var res = BacktestHourly.RiskBacktester.simulate(s, strat, cfg);
+        assertEquals(1, res.trades.size());
+        var tr = res.trades.get(0);
+        assertTrue(tr.exitByStop, "Should exit via stop (moved to entry)");
+        assertEquals(102.0, tr.exitPrice, 1e-9);
+    }
+
+    @Test
+    public void testNoEntryWhenAtrZero() {
+        BarSeries s = buildSeriesWithOHLC(new double[][]{
+                {100, 100, 100, 100},
+                {100, 100, 100, 100}, // flat → ATR=0
+                {101, 101, 101, 101}
+        });
+
+        Strategy strat = enterOnceAt(1);
+        var cfg = baseCfg();
+        cfg.atrLength = 1;
+
+        var res = BacktestHourly.RiskBacktester.simulate(s, strat, cfg);
+
+        assertEquals(0, res.trades.size(), "Should not enter with ATR=0");
+    }
+
 
 
     /** Build a series where each bar has the same mid and symmetrical high/low around it (keeps ATR ~ constant). */
