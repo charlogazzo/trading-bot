@@ -66,7 +66,6 @@ public class RiskBacktesterTest {
     }
 
 
-
     @Test
     public void testStopTouchFill() {
         // Entry @ bar2 open = 102.0; stop = 101.0
@@ -74,7 +73,7 @@ public class RiskBacktesterTest {
 
         BarSeries s = buildSeriesWithOHLC(new double[][]{
                 {100, 100.5,  99.5, 100.0}, // bar0
-                {101, 101.5, 100.5, 101.0}, // bar1 (signal)
+                {101, 101.0, 100.0, 100.5},   // TR = 1.0 // bar1 (signal)
                 {102, 102.5, 101.5, 102.0}, // bar2 (entry at 102.0)
                 {101.5, 101.6, 100.9, 101.4} // bar3 (touch stop)
         });
@@ -98,7 +97,7 @@ public class RiskBacktesterTest {
 
         BarSeries s = buildSeriesWithOHLC(new double[][]{
                 {100, 100.5,  99.5, 100.0}, // bar0
-                {101, 101.5, 100.5, 101.0}, // bar1 (signal)
+                {101, 101.0, 100.0, 100.5}, // bar1 (signal)
                 {102, 102.5, 101.5, 102.0}, // bar2 (entry at 102.0)
                 {102.8, 103.2, 102.2, 103.0}, // bar3 (tp1 touch)
                 {103.8, 104.2, 103.2, 104.0}  // bar4 (tp final touch)
@@ -125,7 +124,7 @@ public class RiskBacktesterTest {
     }
 
 
-    @Test
+    /*@Test
     public void testBreakEvenRaisesStopToEntry() {
         // Entry @ 102.0; after bar3 prevClose >= 103.0 -> BE triggers (stop raised to 102.0)
         // Bar4 low < 102 triggers stop at 102.0
@@ -146,8 +145,40 @@ public class RiskBacktesterTest {
         var res = BacktestHourly.RiskBacktester.simulate(s, strat, cfg);
         assertEquals(1, res.trades.size());
         var tr = res.trades.get(0);
-        assertTrue(tr.exitByStop, "Should exit via stop (moved to entry)");
         assertEquals(102.0, tr.exitPrice, 1e-9);
+        assertTrue(tr.exitByStop, "Should exit via stop (moved to entry)");
+    }*/
+
+    @Test
+    public void testBreakEvenRaisesStopToEntry() {
+        // Entry @ 102.0; after bar3 prevClose >= 103.0 -> BE triggers (stop raised to 102.0)
+        // Bar4 low < 102 triggers stop at 102.0
+
+        // bar0: establish ATR (let's say TR=1.0 for simplicity)
+        // bar1: signal
+        // bar2: entry at 102.0, risk=1.0, beTrigger=102.0+1.0*1.0=103.0
+        // bar3: close needs to be >= 103.0
+
+        BarSeries s = buildSeriesWithOHLC(new double[][]{
+                {100, 101,  99, 100},    // bar0: TR=2.0 (100-99=1, but max is actually 101-99=2)
+                {101, 101.5, 100.5, 101}, // bar1: signal
+                {102, 102.5, 101.5, 103.1}, // bar2: entry, close=103.1 (>= 103.0!)
+                {103.2, 103.5, 102.8, 103.2}, // bar3: BE applies (prevClose=103.1 >= 103.0)
+                {101.9, 102.3, 101.5, 102.0}  // bar4: low < 102 => stop at 102.0
+        });
+
+        Strategy strat = enterOnceAt(1);
+        var cfg = baseCfg();
+        cfg.useBreakEven = true;
+        cfg.breakEvenR   = 1.0;
+        cfg.atrLength = 1;
+        cfg.atrMultiple = 1.0;
+
+        var res = BacktestHourly.RiskBacktester.simulate(s, strat, cfg);
+        assertEquals(1, res.trades.size());
+        var tr = res.trades.get(0);
+        assertEquals(102.0, tr.exitPrice, 1e-9);
+        assertTrue(tr.exitByStop, "Should exit via stop (moved to entry)");
     }
 
 
@@ -230,7 +261,7 @@ public class RiskBacktesterTest {
         cfg.commissionPerShare = 0.0;
         cfg.slippageBps    = 0.0;   // simplify assertions
         cfg.enforceCash    = true;
-        cfg.warmupBars     = 1;
+        cfg.warmupBars     = 0;
 
         // Disable extras by default (enable per test as needed)
         cfg.useBreakEven   = false;
