@@ -16,7 +16,9 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class AlpacaBarService {
@@ -29,12 +31,12 @@ public class AlpacaBarService {
 
     static HttpClient client = HttpClient.newHttpClient();
 
-    public List<Bar> getBarResponse(List<String> symbols) throws Exception {
+    public Map<String, Bar> getBarResponse(List<String> symbols) throws Exception {
         HttpRequest request = buildHttpRequestWithSymbols(symbols);
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         String jsonResponse = response.body();
-        List<Bar> bars = mapJsonNodeToBarNode(jsonResponse, symbols);
+        Map<String, Bar> bars = mapJsonNodeToBarNode(jsonResponse, symbols);
 
         log.info("\n ======== Response ======== \n {}", response.body());
         return bars;
@@ -54,8 +56,8 @@ public class AlpacaBarService {
                 .build();
     }
 
-    private static List<Bar> mapJsonNodeToBarNode(String jsonRoot, List<String> symbols) throws Exception {
-        List<Bar> parsedBars = new ArrayList<>();
+    private static Map<String, Bar> mapJsonNodeToBarNode(String jsonRoot, List<String> symbols) throws Exception {
+        Map<String, Bar> parsedBars = new HashMap<>();
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
 
@@ -75,7 +77,7 @@ public class AlpacaBarService {
                     barNode.get("v").asDouble()
             );
 
-            parsedBars.add(bar);
+            parsedBars.put(symbol, bar);
         }
         return parsedBars;
     }
