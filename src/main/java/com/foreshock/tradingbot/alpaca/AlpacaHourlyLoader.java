@@ -33,21 +33,30 @@ public class AlpacaHourlyLoader {
 
     private static final Logger log = LoggerFactory.getLogger(AlpacaHourlyLoader.class);
 
-    public static BarSeries loadHourlyBars(String symbol, ZonedDateTime startInclusive,
-                                           ZonedDateTime endInclusive, String apiKey, String apiSecret) throws Exception {
+    // Load bars for any supported Alpaca timeframe (e.g. "5Min", "1Hour", "1Day", "1Week", "3Month")
+    public static BarSeries loadBars(String symbol, String alpacaTimeFrame, ZonedDateTime startInclusive,
+                                     ZonedDateTime endInclusive, String apiKey, String apiSecret) throws Exception {
+        String seriesName = symbol + "-" + alpacaTimeFrame;
         BarSeries series = new BaseBarSeriesBuilder()
-                .withName(symbol + "-hourly")
+                .withName(seriesName)
                 .withNumTypeOf(DoubleNum::valueOf)
                 .build();
 
         HttpClient alpacaClient = HttpClient.newHttpClient();
         ObjectMapper mapper = new ObjectMapper();
 
-        String timeFrame = "1Hour";
+        // validate/normalize timeframe
+        String timeFrame = alpacaTimeFrame;
+        if (!isValidAlpacaTimeFrame(timeFrame)) {
+            throw new IllegalArgumentException("Unsupported Alpaca timeframe: " + timeFrame);
+        }
+
         String pageToken = null;
 
         String start = startInclusive.withZoneSameInstant(ZoneOffset.UTC).format(ISO_INSTANT);
         String end = endInclusive.withZoneSameInstant(ZoneOffset.UTC).format(ISO_INSTANT);
+
+        Duration barDuration = parseAlpacaTimeFrameToDuration(timeFrame);
 
         while(true) {
             StringBuilder url = new StringBuilder(BASE_URL)
@@ -77,10 +86,13 @@ public class AlpacaHourlyLoader {
 
             JsonNode root = mapper.readTree(response.body());
             JsonNode bars = root.get("bars");
-            if (bars.isEmpty() || bars.isNull()) {
+            if (bars == null || bars.isEmpty() || bars.isNull()) {
                 break;
             }
             JsonNode symbolBars = bars.get(symbol);
+            if (symbolBars == null || symbolBars.isNull()) {
+                break;
+            }
 
             for (JsonNode b : symbolBars) {
                 String t = b.get("t").asText();
@@ -94,7 +106,7 @@ public class AlpacaHourlyLoader {
                 Instant instant = Instant.parse(t);
                 ZonedDateTime endTime = instant.atZone(ZoneId.of("UTC"));
 
-                Bar bar = new BaseBar(Duration.ofHours(1), endTime, o, h, l, c, v);
+                Bar bar = new BaseBar(barDuration, endTime, o, h, l, c, v);
                 series.addBar(bar);
             }
 
@@ -105,6 +117,63 @@ public class AlpacaHourlyLoader {
             pageToken = nextToken.asText();
         }
         return series;
+    }
+
+    // Convenience overload: map a Duration to common Alpaca timeframe strings for quick calls.
+    public static BarSeries loadBars(String symbol, Duration duration, ZonedDateTime startInclusive,
+                                     ZonedDateTime endInclusive, String apiKey, String apiSecret) throws Exception {
+        String tf;
+        if (duration.equals(Duration.ofMinutes(1))) tf = "1Min";
+        else if (duration.equals(Duration.ofMinutes(5))) tf = "5Min";
+        else if (duration.equals(Duration.ofMinutes(15))) tf = "15Min";
+        else if (duration.equals(Duration.ofMinutes(30))) tf = "30Min";
+        else if (duration.equals(Duration.ofHours(1))) tf = "1Hour";
+        else if (duration.equals(Duration.ofHours(4))) tf = "4Hour";
+        else if (duration.equals(Duration.ofDays(1))) tf = "1Day";
+        else throw new IllegalArgumentException("Unsupported Duration -> Alpaca timeframe mapping: " + duration);
+        return loadBars(symbol, tf, startInclusive, endInclusive, apiKey, apiSecret);
+    }
+
+    static boolean isValidAlpacaTimeFrame(String tf) {
+        if (tf == null) return false;
+        // allowed patterns: [1-59]Min, [0-24]Hour, 1Day, 1Week, [1,2,3,4,6,12]Month
+            return tf.matches("^(?:[1-9]|[1-5][0-9])Min$")
+                || tf.matches("^(?:[1-9]|1[0-9]|2[0-4])Hour$")
+                || tf.equals("1Day")
+                || tf.equals("1Week")
+                || tf.matches("^(1|2|3|4|6|12)Month$");
+    }
+
+    public static Duration parseAlpacaTimeFrameToDuration(String tf) {
+        if (tf.endsWith("Min")) {
+            int m = Integer.parseInt(tf.substring(0, tf.length() - 3));
+            return Duration.ofMinutes(m);
+        }
+        if (tf.endsWith("Hour")) {
+            int h = Integer.parseInt(tf.substring(0, tf.length() - 4));
+            return Duration.ofHours(h);
+        }
+        if (tf.equals("1Day")) return Duration.ofDays(1);
+        if (tf.equals("1Week")) return Duration.ofDays(7);
+        if (tf.endsWith("Month")) {
+            int months = Integer.parseInt(tf.substring(0, tf.length() - 5));
+            // Duration doesn't have months; approximate a month as 30 days for bar length purposes
+            return Duration.ofDays(30L * months);
+        }
+        // fallback
+        throw new IllegalArgumentException("Cannot parse timeframe to duration: " + tf);
+    }
+
+    // Package-private helper: map a Duration to an Alpaca timeframe string for common intervals.
+    static String durationToAlpacaTimeframe(Duration duration) {
+        if (duration.equals(Duration.ofMinutes(1))) return "1Min";
+        if (duration.equals(Duration.ofMinutes(5))) return "5Min";
+        if (duration.equals(Duration.ofMinutes(15))) return "15Min";
+        if (duration.equals(Duration.ofMinutes(30))) return "30Min";
+        if (duration.equals(Duration.ofHours(1))) return "1Hour";
+        if (duration.equals(Duration.ofHours(4))) return "4Hour";
+        if (duration.equals(Duration.ofDays(1))) return "1Day";
+        throw new IllegalArgumentException("Unsupported Duration -> Alpaca timeframe mapping: " + duration);
     }
 
     // Simple strategy (20/60 SMA cross + RSI<80)
@@ -128,7 +197,7 @@ public class AlpacaHourlyLoader {
         ZonedDateTime end = ZonedDateTime.of(LocalDateTime.of(2024, 3, 31, 0, 0, 0),
                 ZoneId.of("UTC"));
 
-        BarSeries series = loadHourlyBars(symbol, start, end, API_KEY_ID, API_SECRET_KEY);
+    BarSeries series = loadBars(symbol, "1Hour", start, end, API_KEY_ID, API_SECRET_KEY);
         log.info("Loaded bars: {}", series.getBarCount());
 
         Strategy strategy = buildStrategy(series);

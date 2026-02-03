@@ -38,24 +38,26 @@ public class BacktestHourly {
     private static final Source DEFAULT_SOURCE = Source.ALPACA; // or Source.CSV
     private static final String DEFAULT_SYMBOL = "AAPL";
     private static final String DEFAULT_CSV_RESOURCE = "hourly_stock_data.csv";
+    private static final String DEFAULT_TIMEFRAME = "1Hour";
     private static final ZonedDateTime DEFAULT_START = ZonedDateTime.of(LocalDateTime.of(2024, 1, 2, 0, 0), ZoneId.of("UTC"));
     private static final ZonedDateTime DEFAULT_END = ZonedDateTime.of(LocalDateTime.of(2024, 6, 30, 0, 0), ZoneId.of("UTC"));
 
     /* ============================ Data Loading ============================ */
-    static BarSeries loadSeriesFromCsv(String resourceName) throws Exception {
+    static BarSeries loadSeriesFromCsv(String resourceName, String alpacaTimeframe) throws Exception {
         BarSeries series = new BaseBarSeriesBuilder()
                 .withName("CSV-HourlyData")
                 .withNumTypeOf(DoubleNum::valueOf) // change to withNumTypeOf if your TA4J version requires it
                 .build();
 
-        DateTimeFormatter tsFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
+    DateTimeFormatter tsFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
+    Duration barDuration = timeframeToDuration(alpacaTimeframe);
         InputStream inputStream = BacktestHourly.class.getClassLoader().getResourceAsStream(resourceName);
         if (inputStream == null) {
             throw new IllegalArgumentException("Resource not found: " + resourceName);
         }
 
         try (BufferedReader br = new BufferedReader(new InputStreamReader(inputStream))) {
-            String header = br.readLine(); // skip header
+            br.readLine(); // skip header
             String line;
             while ((line = br.readLine()) != null) {
                 String[] p = line.split(",");
@@ -67,7 +69,7 @@ public class BacktestHourly {
                 double close = Double.parseDouble(p[4]);
                 double volume = Double.parseDouble(p[5]);
 
-                Bar bar = new BaseBar(Duration.ofHours(1), endTime, open, high, low, close, volume);
+                Bar bar = new BaseBar(barDuration, endTime, open, high, low, close, volume);
                 series.addBar(bar);
             }
         }
@@ -84,19 +86,38 @@ public class BacktestHourly {
         if (apiKey == null || apiSecret == null) {
             throw new IllegalStateException("Missing env vars ALPACA_API_KEY / ALPACA_API_SECRET");
         }
-        return AlpacaHourlyLoader.loadHourlyBars(symbol, start, end, apiKey, apiSecret);
+        // default timeframe 1Hour retained here for backwards compat - prefer calling overload below
+        return AlpacaHourlyLoader.loadBars(symbol, "1Hour", start, end, apiKey, apiSecret);
+    }
+
+    static BarSeries loadSeriesFromAlpaca(String symbol,
+                                          ZonedDateTime start,
+                                          ZonedDateTime end,
+                                          String alpacaTimeframe) throws Exception {
+        String apiKey = System.getenv("ALPACA_API_KEY");
+        String apiSecret = System.getenv("ALPACA_API_SECRET");
+        if (apiKey == null || apiSecret == null) {
+            throw new IllegalStateException("Missing env vars ALPACA_API_KEY / ALPACA_API_SECRET");
+        }
+        return AlpacaHourlyLoader.loadBars(symbol, alpacaTimeframe, start, end, apiKey, apiSecret);
+    }
+
+    private static Duration timeframeToDuration(String tf) {
+        // reuse the loader's parser where possible
+        return AlpacaHourlyLoader.parseAlpacaTimeFrameToDuration(tf);
     }
 
     static BarSeries loadSeries(Source source,
                                 String symbol,
                                 String csvResource,
                                 ZonedDateTime start,
-                                ZonedDateTime end) throws Exception {
+                                ZonedDateTime end,
+                                String alpacaTimeframe) throws Exception {
         switch (source) {
             case CSV:
-                return loadSeriesFromCsv(csvResource);
+                return loadSeriesFromCsv(csvResource, alpacaTimeframe);
             case ALPACA:
-                return loadSeriesFromAlpaca(symbol, start, end);
+                return loadSeriesFromAlpaca(symbol, start, end, alpacaTimeframe);
             default:
                 throw new IllegalArgumentException("Unknown source: " + source);
         }
@@ -458,10 +479,13 @@ public class BacktestHourly {
             // Mode
             String mode = flags.getOrDefault("mode", "WFT").toUpperCase(); // BASELINE|RISK|WFT
 
-            // Load data
-            BarSeries series = (source == Source.CSV)
-                    ? loadSeries(source, symbol, DEFAULT_CSV_RESOURCE, start, end)
-                    : loadSeries(source, symbol, null, start, end);
+            // Timeframe
+            String timeframe = flags.getOrDefault("timeframe", DEFAULT_TIMEFRAME);
+
+        // Load data
+        BarSeries series = (source == Source.CSV)
+            ? loadSeries(source, symbol, DEFAULT_CSV_RESOURCE, start, end, timeframe)
+            : loadSeries(source, symbol, null, start, end, timeframe);
 
             System.out.printf("Mode=%s  Source=%s  Symbol=%s  Bars=%d%n", mode, source, symbol, series.getBarCount());
 
