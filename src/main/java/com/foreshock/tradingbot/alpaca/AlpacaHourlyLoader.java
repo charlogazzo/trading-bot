@@ -33,7 +33,8 @@ public class AlpacaHourlyLoader {
 
     private static final Logger log = LoggerFactory.getLogger(AlpacaHourlyLoader.class);
 
-    public static BarSeries loadHourlyBars(String symbol, ZonedDateTime startInclusive,
+    // TODO: refactor method to load varied time frames e.g. 5-minute, 15-minute, 1 hour e.t.c.
+    public static BarSeries loadHourlyBars(String symbol, Duration duration, ZonedDateTime startInclusive,
                                            ZonedDateTime endInclusive, String apiKey, String apiSecret) throws Exception {
         BarSeries series = new BaseBarSeriesBuilder()
                 .withName(symbol + "-hourly")
