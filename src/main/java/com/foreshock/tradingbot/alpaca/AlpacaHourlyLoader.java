@@ -16,6 +16,8 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 
+import com.foreshock.tradingbot.strategy.Strategies;
+
 public class AlpacaHourlyLoader {
     // Historical bars are only available from the base endpoint "https://data.alpaca.markets"
     // Placing orders and retrieving general asset data can be performed through "https://paper-api.alpaca.markets"
@@ -172,7 +174,7 @@ public class AlpacaHourlyLoader {
 
     // Delegate strategy creation to shared factory
     static Strategy buildStrategy(BarSeries series) {
-        return com.foreshock.tradingbot.strategy.Strategies.sma20_60_rsi14(series);
+        return Strategies.sma20_60_rsi14(series);
     }
 
     public static void main(String[] args) throws Exception {

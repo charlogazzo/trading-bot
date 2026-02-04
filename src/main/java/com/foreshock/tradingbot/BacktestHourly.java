@@ -21,6 +21,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.foreshock.tradingbot.strategy.Strategies;
+
 /**
  * Backtest runner that can load data from CSV (resources) or Alpaca API,
  * run baseline TA4J backtest, and run risk-aware backtest (1% risk per trade).
@@ -124,7 +126,7 @@ public class BacktestHourly {
     /* ============================ Strategy ============================ */
     static Strategy buildStrategy(BarSeries series) {
         // Use the shared strategy factory for SMA+RSI variants
-        return com.foreshock.tradingbot.strategy.Strategies.sma50_100_rsi14(series);
+        return Strategies.sma50_100_rsi14(series);
     }
 
     /* ============================ Debug (optional) ============================ */
