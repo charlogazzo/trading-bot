@@ -2,11 +2,12 @@ package com.foreshock.tradingbot.alpaca;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.foreshock.tradingbot.strategy.Strategies;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.ta4j.core.*;
 import org.ta4j.core.analysis.criteria.NumberOfPositionsCriterion;
 import org.ta4j.core.num.DoubleNum;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -15,8 +16,6 @@ import java.net.http.HttpResponse;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
-
-import com.foreshock.tradingbot.strategy.Strategies;
 
 public class AlpacaHourlyLoader {
     // Historical bars are only available from the base endpoint "https://data.alpaca.markets"
@@ -174,7 +173,7 @@ public class AlpacaHourlyLoader {
 
     // Delegate strategy creation to shared factory
     static Strategy buildStrategy(BarSeries series) {
-        return Strategies.sma20_60_rsi14(series);
+        return Strategies.smaRsi(series, 20, 60, 14, 50);
     }
 
     public static void main(String[] args) throws Exception {

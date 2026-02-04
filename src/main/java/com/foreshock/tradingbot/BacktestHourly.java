@@ -2,6 +2,7 @@
 package com.foreshock.tradingbot;
 
 import com.foreshock.tradingbot.alpaca.AlpacaHourlyLoader;
+import com.foreshock.tradingbot.strategy.Strategies;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.ta4j.core.*;
@@ -11,17 +12,17 @@ import org.ta4j.core.analysis.criteria.pnl.GrossProfitCriterion;
 import org.ta4j.core.indicators.ATRIndicator;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
 import org.ta4j.core.num.DoubleNum;
-// rules are provided by strategy factories now
 
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.time.*;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-
-import com.foreshock.tradingbot.strategy.Strategies;
 
 /**
  * Backtest runner that can load data from CSV (resources) or Alpaca API,
@@ -135,7 +136,8 @@ public class BacktestHourly {
     /* ============================ Strategy ============================ */
     static Strategy buildStrategy(BarSeries series) {
         // Use the shared strategy factory for SMA+RSI variants
-        return Strategies.sma50_100_rsi14(series);
+
+        return Strategies.smaRsi(series, 50, 100, 14, 50);
     }
 
     /* ============================ Debug (optional) ============================ */
