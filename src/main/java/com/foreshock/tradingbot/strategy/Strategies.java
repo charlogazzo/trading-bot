@@ -1,10 +1,10 @@
 package com.foreshock.tradingbot.strategy;
 
 import org.ta4j.core.BarSeries;
-import org.ta4j.core.Strategy;
 import org.ta4j.core.BaseStrategy;
-import org.ta4j.core.indicators.SMAIndicator;
+import org.ta4j.core.Strategy;
 import org.ta4j.core.indicators.RSIIndicator;
+import org.ta4j.core.indicators.SMAIndicator;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
 import org.ta4j.core.rules.CrossedDownIndicatorRule;
 import org.ta4j.core.rules.CrossedUpIndicatorRule;
@@ -33,14 +33,5 @@ public final class Strategies {
                         .and(new UnderIndicatorRule(rsi, series.numOf(rsiThreshold))),
                 new CrossedDownIndicatorRule(smaFast, smaSlow)
         );
-    }
-
-    // Convenience presets matching the originals
-    public static Strategy sma50_100_rsi14(BarSeries series) {
-        return smaRsi(series, 50, 100, 14, 50);
-    }
-
-    public static Strategy sma20_60_rsi14(BarSeries series) {
-        return smaRsi(series, 20, 60, 14, 50);
     }
 }
