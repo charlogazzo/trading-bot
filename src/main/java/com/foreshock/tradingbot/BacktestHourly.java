@@ -9,11 +9,9 @@ import org.ta4j.core.analysis.criteria.MaximumDrawdownCriterion;
 import org.ta4j.core.analysis.criteria.NumberOfPositionsCriterion;
 import org.ta4j.core.analysis.criteria.pnl.GrossProfitCriterion;
 import org.ta4j.core.indicators.ATRIndicator;
-import org.ta4j.core.indicators.RSIIndicator;
-import org.ta4j.core.indicators.SMAIndicator;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
 import org.ta4j.core.num.DoubleNum;
-import org.ta4j.core.rules.*;
+// rules are provided by strategy factories now
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -22,6 +20,8 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.foreshock.tradingbot.strategy.Strategies;
 
 /**
  * Backtest runner that can load data from CSV (resources) or Alpaca API,
@@ -125,17 +125,8 @@ public class BacktestHourly {
 
     /* ============================ Strategy ============================ */
     static Strategy buildStrategy(BarSeries series) {
-        ClosePriceIndicator close = new ClosePriceIndicator(series);
-        // 20/60 SMAs to get reasonable frequency on hourly data
-        SMAIndicator smaFast = new SMAIndicator(close, 50);
-        SMAIndicator smaSlow = new SMAIndicator(close, 100);
-        RSIIndicator rsi14 = new RSIIndicator(close, 14);
-
-        Rule entryRule = new CrossedUpIndicatorRule(smaFast, smaSlow)
-                .and(new UnderIndicatorRule(rsi14, series.numOf(50))); // relax to 80 if desired
-        Rule exitRule = new CrossedDownIndicatorRule(smaFast, smaSlow);
-
-        return new BaseStrategy(entryRule, exitRule);
+        // Use the shared strategy factory for SMA+RSI variants
+        return Strategies.sma50_100_rsi14(series);
     }
 
     /* ============================ Debug (optional) ============================ */

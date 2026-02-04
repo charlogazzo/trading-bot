@@ -4,13 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ta4j.core.*;
 import org.ta4j.core.analysis.criteria.NumberOfPositionsCriterion;
-import org.ta4j.core.indicators.RSIIndicator;
-import org.ta4j.core.indicators.SMAIndicator;
-import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
 import org.ta4j.core.num.DoubleNum;
-import org.ta4j.core.rules.CrossedDownIndicatorRule;
-import org.ta4j.core.rules.CrossedUpIndicatorRule;
-import org.ta4j.core.rules.UnderIndicatorRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,6 +15,8 @@ import java.net.http.HttpResponse;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
+
+import com.foreshock.tradingbot.strategy.Strategies;
 
 public class AlpacaHourlyLoader {
     // Historical bars are only available from the base endpoint "https://data.alpaca.markets"
@@ -176,17 +172,9 @@ public class AlpacaHourlyLoader {
         throw new IllegalArgumentException("Unsupported Duration -> Alpaca timeframe mapping: " + duration);
     }
 
-    // Simple strategy (20/60 SMA cross + RSI<80)
+    // Delegate strategy creation to shared factory
     static Strategy buildStrategy(BarSeries series) {
-        ClosePriceIndicator close = new ClosePriceIndicator(series);
-        SMAIndicator sma20 = new SMAIndicator(close, 20);
-        SMAIndicator sma60 = new SMAIndicator(close, 60);
-        RSIIndicator rsi14 = new RSIIndicator(close, 14);
-
-        Rule entry = new CrossedUpIndicatorRule(sma20, sma60)
-                .and(new UnderIndicatorRule(rsi14, series.numOf(50)));
-        Rule exit = new CrossedDownIndicatorRule(sma20, sma60);
-        return new BaseStrategy(entry, exit);
+        return Strategies.sma20_60_rsi14(series);
     }
 
     public static void main(String[] args) throws Exception {
