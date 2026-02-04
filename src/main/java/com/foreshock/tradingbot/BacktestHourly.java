@@ -190,6 +190,9 @@ public class BacktestHourly {
             public double partialTpPct = 0.5;     // sell 50% at first TP
             public double finalTpR = 2.0;     // final TP in R; if <=0, disabled
 
+            // Allow short selling
+            public boolean allowShorts = false;
+
             // Notes:
             // If usePartialTP=false, we fall back to single takeProfitR above.
         }
@@ -202,6 +205,7 @@ public class BacktestHourly {
             public int shares;
             public boolean exitByStop;
             public boolean exitByTP;
+            public boolean isShort;
             public double pnl;
             boolean exitByTime;
 
@@ -212,8 +216,8 @@ public class BacktestHourly {
             @Override
             public String toString() {
                 return String.format(
-                        "Trade{entryIdx=%d @ %.4f, exitIdx=%d @ %.4f, shares=%d, pnl=%.2f, stop=%s, tp=%s}",
-                        entryIndex, entryPrice, exitIndex, exitPrice, shares, pnl, exitByStop, exitByTP
+                        "Trade{side=%s, entryIdx=%d @ %.4f, exitIdx=%d @ %.4f, shares=%d, pnl=%.2f, stop=%s, tp=%s}",
+                        (isShort ? "SHORT" : "LONG"), entryIndex, entryPrice, exitIndex, exitPrice, shares, pnl, exitByStop, exitByTP
                 );
             }
         }
@@ -243,6 +247,7 @@ public class BacktestHourly {
             boolean inPosition = false;
             boolean partialTaken = false;
             boolean breakEvenApplied = false;
+            boolean posIsShort = false;
 
             int entryIndex = -1;
             int shares = 0;
@@ -271,9 +276,19 @@ public class BacktestHourly {
                         );
 
                         if (qty > 0) {
+                            // Decide side: long by default; allow shorts when enabled and heuristic applies
+                            boolean wantShort = false;
+                            if (cfg.allowShorts) {
+                                wantShort = prevClose > open; // simple heuristic; user can tune
+                            }
+
                             entryPrice = open;
-                            stopPrice = entryPrice - risk;
                             initialRiskPerShare = risk;
+                            if (!wantShort) {
+                                stopPrice = entryPrice - risk;
+                            } else {
+                                stopPrice = entryPrice + risk; // stop above for shorts
+                            }
 
                             shares = qty;
                             entryIndex = i;
@@ -282,8 +297,14 @@ public class BacktestHourly {
                             inPosition = true;
                             partialTaken = false;
                             breakEvenApplied = false;
+                            posIsShort = wantShort;
 
-                            cash -= shares * entryPrice;
+                            if (!wantShort) {
+                                cash -= shares * entryPrice;
+                            } else {
+                                // credit proceeds for short sale
+                                cash += shares * entryPrice;
+                            }
                         }
                     }
                 }
@@ -319,10 +340,11 @@ public class BacktestHourly {
 
                 /* ===== BREAK EVEN ===== */
                 if (cfg.useBreakEven && !breakEvenApplied) {
-                    double beTrigger =
-                            entryPrice + cfg.breakEvenR * initialRiskPerShare;
+                    double beTrigger = !posIsShort
+                            ? entryPrice + cfg.breakEvenR * initialRiskPerShare
+                            : entryPrice - cfg.breakEvenR * initialRiskPerShare;
 
-                    if (prevClose >= beTrigger) {
+                    if ((!posIsShort && prevClose >= beTrigger) || (posIsShort && prevClose <= beTrigger)) {
                         stopPrice = entryPrice;
                         breakEvenApplied = true;
                     }
@@ -332,15 +354,20 @@ public class BacktestHourly {
 //                boolean stopGap   = open <= stopPrice;
 //                boolean stopTouch = low <= stopPrice && open > stopPrice;
 
-                boolean stopGap = open <= stopPrice;
-                boolean stopTouch = !stopGap && low <= stopPrice;
+                boolean stopGap = (!posIsShort && open <= stopPrice) || (posIsShort && open >= stopPrice);
+                boolean stopTouch = (!posIsShort && !stopGap && low <= stopPrice) || (posIsShort && !stopGap && high >= stopPrice);
 
 
                 if (stopGap || stopTouch) {
                     // Always use stop price for exit (assumes stop order fills at limit)
                     double exitPrice = stopPrice;
 
-                    cash += shares * exitPrice;
+                    if (!posIsShort) {
+                        cash += shares * exitPrice;
+                    } else {
+                        // buy to cover
+                        cash -= shares * exitPrice;
+                    }
 
                     Trade tr = new Trade();
                     tr.entryIndex = entryIndex;
@@ -351,24 +378,28 @@ public class BacktestHourly {
                     tr.exitByStop = true;
                     tr.exitByTP = false;
                     tr.exitByTime = false;
+                    tr.isShort = posIsShort;
 
                     res.trades.add(tr);
                     inPosition = false;
+                    posIsShort = false;
                     continue;
                 }
 
                 /* ===== PARTIAL TP ===== */
                 if (cfg.usePartialTP && !partialTaken) {
-                    double tp1 =
-                            entryPrice + cfg.partialTpR * initialRiskPerShare;
+                    double tp1 = !posIsShort
+                            ? entryPrice + cfg.partialTpR * initialRiskPerShare
+                            : entryPrice - cfg.partialTpR * initialRiskPerShare;
 
-                    if (high >= tp1) {
+                    if ((!posIsShort && high >= tp1) || (posIsShort && low <= tp1)) {
                         int qty = (int) Math.floor(
                                 shares * cfg.partialTpPct
                         );
 
                         if (qty > 0) {
-                            cash += qty * tp1;
+                            if (!posIsShort) cash += qty * tp1;
+                            else cash -= qty * tp1; // buy to cover
 
                             Trade tr = new Trade();
                             tr.entryIndex = entryIndex;
@@ -379,6 +410,7 @@ public class BacktestHourly {
                             tr.exitByTP = true;
                             tr.exitByStop = false;
                             tr.exitByTime = false;  // NEW
+                            tr.isShort = posIsShort;
 
                             res.trades.add(tr);
 
@@ -389,11 +421,13 @@ public class BacktestHourly {
                 }
 
                 /* ===== FINAL TP ===== */
-                double finalTp =
-                        entryPrice + cfg.finalTpR * initialRiskPerShare;
+                double finalTp = !posIsShort
+                        ? entryPrice + cfg.finalTpR * initialRiskPerShare
+                        : entryPrice - cfg.finalTpR * initialRiskPerShare;
 
-                if (cfg.finalTpR > 0 && high >= finalTp) {
-                    cash += shares * finalTp;
+                if (cfg.finalTpR > 0 && ((!posIsShort && high >= finalTp) || (posIsShort && low <= finalTp))) {
+                    if (!posIsShort) cash += shares * finalTp;
+                    else cash -= shares * finalTp;
 
                     Trade tr = new Trade();
                     tr.entryIndex = entryIndex;
@@ -404,15 +438,22 @@ public class BacktestHourly {
                     tr.exitByTP = true;
                     tr.exitByStop = false;
                     tr.exitByTime = false;  // NEW
+                    tr.isShort = posIsShort;
 
                     res.trades.add(tr);
                     inPosition = false;
+                    posIsShort = false;
                     continue;
                 }
 
-                res.equityCurve.add(
-                        cash + shares * close.getValue(i).doubleValue()
-                );
+        double unreal;
+        if (!inPosition) unreal = 0.0;
+        else if (!posIsShort) unreal = shares * close.getValue(i).doubleValue();
+        else unreal = (entryPrice - close.getValue(i).doubleValue()) * shares;
+
+        res.equityCurve.add(
+            cash + unreal
+        );
             }
 
             // Handle open position at end of series
