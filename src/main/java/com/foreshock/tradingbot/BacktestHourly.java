@@ -76,6 +76,15 @@ public class BacktestHourly {
         return series;
     }
 
+    // Convenience main that delegates to the nested RiskBacktester main.
+    // The original CLI entrypoint lives in BacktestHourly.RiskBacktester.main(...)
+    // but many users expect to run the outer class directly. Delegate so both
+    // forms work: `com.foreshock.tradingbot.BacktestHourly` and
+    // `com.foreshock.tradingbot.BacktestHourly$RiskBacktester`.
+    public static void main(String[] args) throws Exception {
+        RiskBacktester.main(args);
+    }
+
     static BarSeries loadSeriesFromAlpaca(String symbol,
                                           ZonedDateTime start,
                                           ZonedDateTime end) throws Exception {
@@ -443,7 +452,7 @@ public class BacktestHourly {
             return map;
         }
 
-        public static void main(String[] args) throws Exception {
+        public static void main(java.lang.String[] args) throws Exception {
             // Defaults
             Source source = DEFAULT_SOURCE;
             String symbol = DEFAULT_SYMBOL;

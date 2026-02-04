@@ -7,8 +7,30 @@ CLI usage
 
 Run the backtester with:
 
+Note: this project depends on external libraries (TA4J, SLF4J, etc.). When running
+with the `java` command you must place those dependency JARs on the runtime
+classpath. During development the easiest options are shown below.
+
+1) Run via Maven (dependencies handled automatically):
+
 ```bash
-java -cp target/classes com.foreshock.tradingbot.BacktestHourly --mode BASELINE|RISK|WFT [options]
+mvn exec:java -Dexec.mainClass="com.foreshock.tradingbot.BacktestHourly" \
+	-Dexec.args="--mode BASELINE|RISK|WFT [options]"
+```
+
+2) Copy dependencies and run with `java` (explicit classpath):
+
+```bash
+mvn dependency:copy-dependencies -DoutputDirectory=target/dependency
+java -cp target/classes:target/dependency/* com.foreshock.tradingbot.BacktestHourly --mode BASELINE|RISK|WFT [options]
+```
+
+3) Build an "uber" (shaded) JAR and run with `java -jar` (recommended for distribution):
+
+```bash
+# add the Maven Shade plugin to pom.xml (if not present) and then:
+mvn package
+java -jar target/your-app-with-dependencies.jar --mode BASELINE|RISK|WFT [options]
 ```
 
 Common options
