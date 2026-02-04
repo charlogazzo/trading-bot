@@ -3,10 +3,39 @@ package com.foreshock.tradingbot.alpaca;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class AlpacaHourlyLoaderTest {
+
+    @Test
+    public void testLoadBarsThrowsOnInvalidTimeframe() {
+        ZonedDateTime start = ZonedDateTime.of(LocalDateTime.of(2024, 1, 1, 0, 0), ZoneId.of("UTC"));
+        ZonedDateTime end = ZonedDateTime.of(LocalDateTime.of(2024, 1, 2, 0, 0), ZoneId.of("UTC"));
+
+        // Should validate timeframe before attempting any network call
+        assertThrows(IllegalArgumentException.class, () ->
+                AlpacaHourlyLoader.loadBars("AAPL", "BAD_TF", start, end, "", ""));
+    }
+
+    @Test
+    public void testLoadBarsDurationUnsupported() {
+        ZonedDateTime start = ZonedDateTime.of(LocalDateTime.of(2024, 1, 1, 0, 0), ZoneId.of("UTC"));
+        ZonedDateTime end = ZonedDateTime.of(LocalDateTime.of(2024, 1, 2, 0, 0), ZoneId.of("UTC"));
+
+        // Duration.ofSeconds(30) is not mapped in the convenience overload and should throw
+        assertThrows(IllegalArgumentException.class, () ->
+                AlpacaHourlyLoader.loadBars("AAPL", Duration.ofSeconds(30), start, end, "", ""));
+    }
+
+    @Test
+    public void testParseAlpacaTimeFrameToDurationTwelveMonths() {
+        // 12Month should be approximated as 360 days (12 * 30)
+        assertEquals(Duration.ofDays(360), AlpacaHourlyLoader.parseAlpacaTimeFrameToDuration("12Month"));
+    }
 
     @Test
     public void testValidTimeframes() {
