@@ -406,6 +406,7 @@ public final class RiskBacktester {
                         // Determine side: long by default; allow shorts when configured and heuristic indicates
                         boolean wantShort = false;
                         if (cfg.allowShorts) {
+                            // TODO: Implement a more sophisticated heuristic for shorting
                             // Simple heuristic: if previous close is below open, treat as downward momentum and allow short
                             wantShort = prevClose > currOpen; // user can modify this condition later
                         }

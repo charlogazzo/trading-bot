@@ -25,13 +25,6 @@ mvn dependency:copy-dependencies -DoutputDirectory=target/dependency
 java -cp target/classes:target/dependency/* com.foreshock.tradingbot.BacktestHourly --mode BASELINE|RISK|WFT [options]
 ```
 
-3) Build an "uber" (shaded) JAR and run with `java -jar` (recommended for distribution):
-
-```bash
-# add the Maven Shade plugin to pom.xml (if not present) and then:
-mvn package
-java -jar target/your-app-with-dependencies.jar --mode BASELINE|RISK|WFT [options]
-```
 
 Common options
 --------------
