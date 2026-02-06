@@ -43,6 +43,8 @@ public final class RiskBacktester {
         public double  partialTpR    = 1.0;     // 1R first TP
         public double  partialTpPct  = 0.5;     // sell 50% at first TP
         public double  finalTpR      = 2.0;     // final TP in R; if <=0, disabled
+    // Allow short selling
+    public boolean allowShorts   = false;   // disabled by default
 
         // Notes:
         // If usePartialTP=false, we fall back to single takeProfitR above.
@@ -59,13 +61,13 @@ public final class RiskBacktester {
         public int shares;
         public boolean exitByStop;
         public boolean exitByTP;
+        public boolean isShort;
         public double pnl;
 
         public String toString() {
-
             return String.format(
-                    "Trade{entryIdx=%d @ %.4f, exitIdx=%d @ %.4f, shares=%d, pnl=%.2f, stop=%s, tp=%s}",
-                    entryIndex, entryPrice, exitIndex, exitPrice, shares, pnl, exitByStop, exitByTP
+                    "Trade{side=%s, entryIdx=%d @ %.4f, exitIdx=%d @ %.4f, shares=%d, pnl=%.2f, stop=%s, tp=%s}",
+                    (isShort ? "SHORT" : "LONG"), entryIndex, entryPrice, exitIndex, exitPrice, shares, pnl, exitByStop, exitByTP
             );
         }
     }
@@ -94,14 +96,15 @@ public final class RiskBacktester {
         // Account state
         double cash = cfg.startingEquity;
 
-        // Position state (long-only for now)
-        boolean inPosition = false;
-        int     posShares = 0;
-        double  posEntryPrice = 0.0;
+    // Position state (supports long and short)
+    boolean inPosition = false;
+    int     posShares = 0; // positive number of shares
+    double  posEntryPrice = 0.0;
+    boolean posIsShort = false;
 
         // Stop state
-        double  posStop = Double.NaN;           // current working stop (moves up)
-        double  posStopInitial = Double.NaN;    // initial stop at entry (fixed)
+    double  posStop = Double.NaN;           // current working stop (moves up for longs, down for shorts)
+    double  posStopInitial = Double.NaN;    // initial stop at entry (fixed)
         double  entryCommissionTotal = 0.0;     // total commission paid at entry, to be pro-rated on partials
         int     entryIndex = -1;
 
@@ -123,7 +126,7 @@ public final class RiskBacktester {
             // --------------------- EXIT PHASE ---------------------
             if (inPosition) {
                 // --- Compute fixed 1R distance from initial stop ---
-                final double riskPerShareInitial = posEntryPrice - posStopInitial; // 1R is fixed at entry
+                final double riskPerShareInitial = posIsShort ? (posStopInitial - posEntryPrice) : (posEntryPrice - posStopInitial); // positive 1R
 
                 // --- Break-even eligibility (conservative: based on previous close) ---
                 final boolean canMoveToBE = cfg.useBreakEven
@@ -133,16 +136,24 @@ public final class RiskBacktester {
                 if (cfg.useAtrTrail && atrPrev > 0) {
                     final boolean trailActive = !cfg.trailOnlyAfterBE || canMoveToBE;
                     if (trailActive) {
-                        // For a long position, trail = prevClose - atrPrev * atrTrailMult
-                        double trailStop = prevClose - atrPrev * cfg.atrTrailMult;
-                        // Never loosen the stop (only tighten upward)
-                        posStop = Double.isNaN(posStop) ? trailStop : Math.max(posStop, trailStop);
+                        if (!posIsShort) {
+                            // For a long position, trail = prevClose - atrPrev * atrTrailMult
+                            double trailStop = prevClose - atrPrev * cfg.atrTrailMult;
+                            // Never loosen the stop (only tighten upward)
+                            posStop = Double.isNaN(posStop) ? trailStop : Math.max(posStop, trailStop);
+                        } else {
+                            // For a short position, trail = prevClose + atrPrev * atrTrailMult
+                            double trailStop = prevClose + atrPrev * cfg.atrTrailMult;
+                            // Never loosen the stop (only tighten downward)
+                            posStop = Double.isNaN(posStop) ? trailStop : Math.min(posStop, trailStop);
+                        }
                     }
                 }
 
                 // --- Move stop to breakeven if eligible (never lower it) ---
                 if (cfg.useBreakEven && canMoveToBE) {
-                    posStop = Math.max(posStop, posEntryPrice);
+                    if (!posIsShort) posStop = Math.max(posStop, posEntryPrice);
+                    else posStop = Double.isNaN(posStop) ? posEntryPrice : Math.min(posStop, posEntryPrice);
                 }
 
                 // --- Determine TP levels ---
@@ -153,19 +164,26 @@ public final class RiskBacktester {
                         ? (cfg.finalTpR > 0)
                         : (cfg.takeProfitR > 0);
 
-                final double tp1Price = tp1Enabled
-                        ? (posEntryPrice + cfg.partialTpR * riskPerShareInitial)
-                        : Double.NaN;
+        final double tp1Price = tp1Enabled
+            ? (!posIsShort ? (posEntryPrice + cfg.partialTpR * riskPerShareInitial) : (posEntryPrice - cfg.partialTpR * riskPerShareInitial))
+            : Double.NaN;
 
                 final double tpFinalR = cfg.usePartialTP ? cfg.finalTpR : cfg.takeProfitR;
-                final double tpFinalPrice = tpFinalEnabled
-                        ? (posEntryPrice + tpFinalR * riskPerShareInitial)
-                        : Double.NaN;
+        final double tpFinalPrice = tpFinalEnabled
+            ? (!posIsShort ? (posEntryPrice + tpFinalR * riskPerShareInitial) : (posEntryPrice - tpFinalR * riskPerShareInitial))
+            : Double.NaN;
 
                 // --- Intrabar events for the current bar (priority will be enforced below) ---
-                final boolean stopGap   = currOpen <= posStop;
-                final boolean stopTouch = (currLow <= posStop) && (currOpen > posStop);
-                final boolean stopHit   = stopGap || stopTouch;
+                final boolean stopGap;
+                final boolean stopTouch;
+                if (!posIsShort) {
+                    stopGap   = currOpen <= posStop;
+                    stopTouch = (currLow <= posStop) && (currOpen > posStop);
+                } else {
+                    stopGap   = currOpen >= posStop;
+                    stopTouch = (currHigh >= posStop) && (currOpen < posStop);
+                }
+                final boolean stopHit = stopGap || stopTouch;
 
                 boolean tp1Gap = false, tp1Touch = false;
                 if (tp1Enabled) {
@@ -191,7 +209,7 @@ public final class RiskBacktester {
                     if (stopHit) {
                         final boolean gap = stopGap;
                         final double base = gap ? currOpen : posStop;
-                        final double exitFill = base - slipOn(base, cfg.slippageBps);
+                        final double exitFill = posIsShort ? base + slipOn(base, cfg.slippageBps) : base - slipOn(base, cfg.slippageBps);
 
                         final int sharesToExit = posShares;
                         final double proceeds = sharesToExit * exitFill;
@@ -200,11 +218,15 @@ public final class RiskBacktester {
                         // All remaining entry commission is attributed to this final exit
                         final double allocatedEntryCommission = entryCommissionTotal;
 
-                        final double pnl = proceeds - exitCommission
-                                - (sharesToExit * posEntryPrice)
-                                - allocatedEntryCommission;
-
-                        cash += proceeds - exitCommission;
+                        final double pnl;
+                        if (!posIsShort) {
+                            pnl = proceeds - exitCommission - (sharesToExit * posEntryPrice) - allocatedEntryCommission;
+                            cash += proceeds - exitCommission;
+                        } else {
+                            // For shorts: buy-to-cover at exitFill (cash decreases), pnl = entryPrice - exitFill
+                            pnl = (posEntryPrice - exitFill) * sharesToExit - exitCommission - allocatedEntryCommission;
+                            cash -= (sharesToExit * exitFill) + exitCommission;
+                        }
 
                         Trade tr = new Trade();
                         tr.entryIndex = entryIndex;
@@ -214,6 +236,7 @@ public final class RiskBacktester {
                         tr.shares     = sharesToExit;
                         tr.exitByStop = true;
                         tr.exitByTP   = false;
+                        tr.isShort    = posIsShort;
                         tr.pnl        = pnl;
                         out.trades.add(tr);
 
@@ -221,6 +244,7 @@ public final class RiskBacktester {
                         inPosition = false;
                         posShares = 0;
                         posEntryPrice = 0.0;
+                        posIsShort = false;
                         posStop = Double.NaN;
                         posStopInitial = Double.NaN;
                         entryIndex = -1;
@@ -233,7 +257,7 @@ public final class RiskBacktester {
                     else if (tp1Enabled && (tp1Gap || tp1Touch)) {
                         final boolean gap = tp1Gap;
                         final double base = gap ? currOpen : tp1Price;
-                        final double exitFill = base - slipOn(base, cfg.slippageBps);
+                        final double exitFill = posIsShort ? base + slipOn(base, cfg.slippageBps) : base - slipOn(base, cfg.slippageBps);
 
                         int sharesToExit = (int) Math.floor(posShares * cfg.partialTpPct);
                         if (sharesToExit < 1) sharesToExit = 1;                  // at least 1 share
@@ -246,11 +270,14 @@ public final class RiskBacktester {
                         final double fraction = (double) sharesToExit / (double) posShares;
                         final double allocatedEntryCommission = entryCommissionTotal * fraction;
 
-                        final double pnl = proceeds - exitCommission
-                                - (sharesToExit * posEntryPrice)
-                                - allocatedEntryCommission;
-
-                        cash += proceeds - exitCommission;
+                        final double pnl;
+                        if (!posIsShort) {
+                            pnl = proceeds - exitCommission - (sharesToExit * posEntryPrice) - allocatedEntryCommission;
+                            cash += proceeds - exitCommission;
+                        } else {
+                            pnl = (posEntryPrice - exitFill) * sharesToExit - exitCommission - allocatedEntryCommission;
+                            cash -= (sharesToExit * exitFill) + exitCommission;
+                        }
 
                         // Reduce position & entry commission pool
                         posShares -= sharesToExit;
@@ -275,7 +302,7 @@ public final class RiskBacktester {
                     else if (tpFinalEnabled && (tpFinalGap || tpFinalTouch)) {
                         final boolean gap = tpFinalGap;
                         final double base = gap ? currOpen : tpFinalPrice;
-                        final double exitFill = base - slipOn(base, cfg.slippageBps);
+                        final double exitFill = posIsShort ? base + slipOn(base, cfg.slippageBps) : base - slipOn(base, cfg.slippageBps);
 
                         final int sharesToExit = posShares;
                         final double proceeds = sharesToExit * exitFill;
@@ -284,11 +311,14 @@ public final class RiskBacktester {
                         // All remaining entry commission goes here
                         final double allocatedEntryCommission = entryCommissionTotal;
 
-                        final double pnl = proceeds - exitCommission
-                                - (sharesToExit * posEntryPrice)
-                                - allocatedEntryCommission;
-
-                        cash += proceeds - exitCommission;
+                        final double pnl;
+                        if (!posIsShort) {
+                            pnl = proceeds - exitCommission - (sharesToExit * posEntryPrice) - allocatedEntryCommission;
+                            cash += proceeds - exitCommission;
+                        } else {
+                            pnl = (posEntryPrice - exitFill) * sharesToExit - exitCommission - allocatedEntryCommission;
+                            cash -= (sharesToExit * exitFill) + exitCommission;
+                        }
 
                         Trade tr = new Trade();
                         tr.entryIndex = entryIndex;
@@ -316,7 +346,7 @@ public final class RiskBacktester {
                     // 4) Exit by signal or time (full exit at open)
                     else if (exitSignal || timeExit) {
                         final double base = currOpen;
-                        final double exitFill = base - slipOn(base, cfg.slippageBps);
+                        final double exitFill = posIsShort ? base + slipOn(base, cfg.slippageBps) : base - slipOn(base, cfg.slippageBps);
 
                         final int sharesToExit = posShares;
                         final double proceeds = sharesToExit * exitFill;
@@ -325,11 +355,14 @@ public final class RiskBacktester {
                         // All remaining entry commission goes here
                         final double allocatedEntryCommission = entryCommissionTotal;
 
-                        final double pnl = proceeds - exitCommission
-                                - (sharesToExit * posEntryPrice)
-                                - allocatedEntryCommission;
-
-                        cash += proceeds - exitCommission;
+                        final double pnl;
+                        if (!posIsShort) {
+                            pnl = proceeds - exitCommission - (sharesToExit * posEntryPrice) - allocatedEntryCommission;
+                            cash += proceeds - exitCommission;
+                        } else {
+                            pnl = (posEntryPrice - exitFill) * sharesToExit - exitCommission - allocatedEntryCommission;
+                            cash -= (sharesToExit * exitFill) + exitCommission;
+                        }
 
                         Trade tr = new Trade();
                         tr.entryIndex = entryIndex;
@@ -346,6 +379,7 @@ public final class RiskBacktester {
                         inPosition = false;
                         posShares = 0;
                         posEntryPrice = 0.0;
+                        posIsShort = false;
                         posStop = Double.NaN;
                         posStopInitial = Double.NaN;
                         entryIndex = -1;
@@ -369,47 +403,75 @@ public final class RiskBacktester {
                     int shares = (int) Math.floor(riskBudget / riskPerShare);
 
                     if (shares >= 1) {
-                        final double slippageBuy = currOpen * (cfg.slippageBps / 10_000.0);
-                        final double entryFill   = currOpen + slippageBuy;
+                        // Determine side: long by default; allow shorts when configured and heuristic indicates
+                        boolean wantShort = false;
+                        if (cfg.allowShorts) {
+                            // TODO: Implement a more sophisticated heuristic for shorting
+                            // Simple heuristic: if previous close is below open, treat as downward momentum and allow short
+                            wantShort = prevClose > currOpen; // user can modify this condition later
+                        }
 
-                        // Provisional commission for intended shares
+                        final double slippage = currOpen * (cfg.slippageBps / 10_000.0);
+                        final double entryFill = wantShort ? (currOpen - slippage) : (currOpen + slippage);
+
                         double commission = shares * cfg.commissionPerShare;
-                        double cost = shares * entryFill + commission;
 
-                        if (!cfg.enforceCash || cost <= cash) {
-                            // Enter with requested size
+                        if (!wantShort) {
+                            double cost = shares * entryFill + commission;
+                            if (!cfg.enforceCash || cost <= cash) {
+                                inPosition = true;
+                                posShares = shares;
+                                posEntryPrice = entryFill;
+                                posStop = entryFill - riskPerShare;
+                                posStopInitial = posStop;
+                                entryCommissionTotal = commission;
+                                entryIndex = i;
+                                barsInTrade = 0;
+                                partialTaken = false;
+                                posIsShort = false;
+                                cash -= cost;
+                            } else {
+                                int affordable = (int) Math.floor((cash) / (entryFill + cfg.commissionPerShare));
+                                if (affordable >= 1) {
+                                    inPosition = true;
+                                    posShares = affordable;
+                                    posEntryPrice = entryFill;
+                                    posStop = entryFill - riskPerShare;
+                                    posStopInitial = posStop;
+                                    entryCommissionTotal = affordable * cfg.commissionPerShare;
+                                    entryIndex = i;
+                                    barsInTrade = 0;
+                                    partialTaken = false;
+                                    posIsShort = false;
+                                    cash -= (affordable * entryFill + entryCommissionTotal);
+                                }
+                            }
+                        } else {
+                            // Short entry: credit proceeds, subtract commission
                             inPosition = true;
                             posShares = shares;
                             posEntryPrice = entryFill;
-                            posStop = entryFill - riskPerShare;
+                            posStop = entryFill + riskPerShare;
                             posStopInitial = posStop;
                             entryCommissionTotal = commission;
                             entryIndex = i;
                             barsInTrade = 0;
                             partialTaken = false;
-                            cash -= cost;
-                        } else {
-                            // Reduce to affordable size
-                            int affordable = (int) Math.floor((cash) / (entryFill + cfg.commissionPerShare));
-                            if (affordable >= 1) {
-                                inPosition = true;
-                                posShares = affordable;
-                                posEntryPrice = entryFill;
-                                posStop = entryFill - riskPerShare;
-                                posStopInitial = posStop;
-                                entryCommissionTotal = affordable * cfg.commissionPerShare;
-                                entryIndex = i;
-                                barsInTrade = 0;
-                                partialTaken = false;
-                                cash -= (affordable * entryFill + entryCommissionTotal);
-                            }
+                            posIsShort = true;
+                            cash += (shares * entryFill) - commission;
                         }
                     }
                 }
             }
 
             // --------------------- EQUITY CURVE ---------------------
-            final double equityAtClose = cash + (inPosition ? posShares * currClose : 0.0);
+            final double equityAtClose;
+            if (!inPosition) equityAtClose = cash;
+            else if (!posIsShort) equityAtClose = cash + posShares * currClose;
+            else {
+                // For shorts, unrealized P&L = (entryPrice - currClose) * shares; cash already includes initial proceeds
+                equityAtClose = cash + (posEntryPrice - currClose) * posShares;
+            }
             out.equityCurve.add(equityAtClose);
         }
 
