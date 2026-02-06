@@ -132,11 +132,11 @@ public class AlpacaHourlyLoader {
     static boolean isValidAlpacaTimeFrame(String tf) {
         if (tf == null) return false;
         // allowed patterns: [1-59]Min, [0-24]Hour, 1Day, 1Week, [1,2,3,4,6,12]Month
-            return tf.matches("^(?:[1-9]|[1-5][0-9])Min$")
-                || tf.matches("^(?:[1-9]|1[0-9]|2[0-4])Hour$")
-                || tf.equals("1Day")
-                || tf.equals("1Week")
-                || tf.matches("^(1|2|3|4|6|12)Month$");
+        return tf.matches("^(?:[1-9]|[1-5][0-9])Min$")
+            || tf.matches("^(?:[1-9]|1[0-9]|2[0-4])Hour$")
+            || tf.equals("1Day")
+            || tf.equals("1Week")
+            || tf.matches("^(1|2|3|4|6|12)Month$");
     }
 
     public static Duration parseAlpacaTimeFrameToDuration(String tf) {

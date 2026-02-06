@@ -22,7 +22,10 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * Backtest runner that can load data from CSV (resources) or Alpaca API,
@@ -438,8 +441,8 @@ public class BacktestHourly {
         }
 
 
-        private static java.util.Map<String, String> parseArgs(String[] args) {
-            java.util.Map<String, String> map = new java.util.HashMap<>();
+        private static Map<String, String> parseArgs(String[] args) {
+            Map<String, String> map = new HashMap<>();
             for (int i = 0; i < args.length; i++) {
                 String a = args[i];
                 if (a.startsWith("--")) {
@@ -454,7 +457,7 @@ public class BacktestHourly {
             return map;
         }
 
-        public static void main(java.lang.String[] args) throws Exception {
+        public static void main(String[] args) throws Exception {
             // Defaults
             Source source = DEFAULT_SOURCE;
             String symbol = DEFAULT_SYMBOL;
@@ -616,7 +619,7 @@ public class BacktestHourly {
         }
 
         private static int[] parseIntArray(String csv) {
-            return java.util.Arrays.stream(csv.split(","))
+            return Arrays.stream(csv.split(","))
                     .map(String::trim).filter(s -> !s.isEmpty())
                     .mapToInt(Integer::parseInt).toArray();
         }
