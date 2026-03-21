@@ -57,13 +57,13 @@ Examples
 Load hourly bars from Alpaca and run the risk backtest:
 
 ```bash
-java -cp target/classes com.foreshock.tradingbot.BacktestHourly --mode RISK --symbol AAPL --timeframe 1Hour --start 2024-01-01 --end 2024-06-01
+java -cp target/classes:target/dependency/* com.foreshock.tradingbot.BacktestHourly --mode RISK --symbol AAPL --timeframe 1Hour --start 2024-01-01 --end 2024-06-01
 ```
 
 Load 5-minute bars from a CSV resource:
 
 ```bash
-java -cp target/classes com.foreshock.tradingbot.BacktestHourly --mode BASELINE --source CSV --timeframe 5Min
+java -cp target/classes:target/dependency/* com.foreshock.tradingbot.BacktestHourly --mode BASELINE --source CSV --timeframe 5Min
 ```
 
 Contributing
